@@ -1,0 +1,16 @@
+{
+  "type": "module",
+  "dependencies": {
+    "dotenv": "^16.5.0",
+    "eris": "^0.18.0",
+    "express": "^5.1.0",
+    "mic": "^2.1.2",
+    "obs-websocket-js": "^5.0.6",
+    "open": "^10.1.1",
+    "python-bridge": "^1.1.0",
+    "say": "^0.16.0",
+    "sox": "^0.1.0",
+    "vosk": "^0.3.39",
+    "ws": "^8.18.1"
+  }
+}
