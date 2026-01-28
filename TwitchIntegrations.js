@@ -20,6 +20,7 @@ const regex = new RegExp(`^${commandPrefix}([a-zA-Z0-9]+)(?:\W+)?(.*)?`);
 let primaryBroadcasterID;
 const twitch = new WebSocket("wss://eventsub.wss.twitch.tv/ws");
 
+var _reward_id = JSON.parse(process.env.REWARD_ID)
 
 export async function generateOAuth(){
     generatedOAuth = true;
@@ -40,11 +41,6 @@ const broadcasterID = {
     tea: '762548538'
 }
 
-async function totallyNormalSubscribe(streamer){
-    const streamerId = await fetchUserID(streamer);
-    subscribeToEvent('channel.chat.message', '1', {"broadcaster_user_id": streamerId, 'user_id': process.env.TWITCH_USER_ID});
-}
-
 twitch.addEventListener('message', async (event)=>{
     const JsonObject = JSON.parse(event.data);
     const data = JsonObject.metadata;
@@ -58,6 +54,7 @@ twitch.addEventListener('message', async (event)=>{
         subscribeToEvent('channel.subscribe', '1', {"broadcaster_user_id": broadcasterID.trumpet});
         subscribeToEvent('channel.poll.end', '1', {"broadcaster_user_id": broadcasterID.trumpet})
         fetchLists();
+        toggleAllChannelpoints(true);
     }
     if(data.message_type == "session_keepalive"){}
     if(data.message_type == "notification"){
@@ -290,6 +287,78 @@ async function fetchModList(broadcaster_id){
     })
 }
 
+async function toggleReward(broadcaster_id, reward_id, state){
+    const accessToken = process.env.TWITCH_OAUTH_TOKEN;
+    var data = {
+        "is_enabled": state
+    }
+    const response = await fetch(`https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${broadcaster_id}&id=${reward_id}`, {
+        method: 'PATCH',
+        headers:{
+            Authorization: `Bearer ${accessToken}`,
+            'Client-Id': process.env.TWITCH_CLIENT_ID,
+            'Content-Type':'application/json'
+        },
+        body: JSON.stringify(data)
+    })
+    const responseData = await response.json();
+    switch(responseData.status){
+        case 404: 
+            if(state){
+                addReward(broadcaster_id, _reward_id[reward_id])
+                delete _reward_id[reward_id]
+                console.log(reward_id)
+            }
+            return;
+    }
+}
+
+async function addReward(broadcaster_id, reward){
+    const accessToken = process.env.TWITCH_OAUTH_TOKEN;
+    var data = {
+        "title": reward.name,
+        "cost": reward.cost,
+        "prompt": reward.prompt,
+        "is_user_input_required": reward.use_input
+    }
+    const response = await fetch(`https://api.twitch.tv/helix/channel_points/custom_rewards?broadcaster_id=${broadcaster_id}`, {
+        method: 'POST',
+        headers:{
+            Authorization: `Bearer ${accessToken}`,
+            'Client-Id': process.env.TWITCH_CLIENT_ID,
+            'Content-Type':'application/json'
+        },
+        body: JSON.stringify(data)
+    })
+    const responseData = await response.json();
+    switch(responseData.status){
+        case 400:
+            console.log("Error: Reward already exists but not owned by bot!")
+            return;
+        default:
+            _reward_id[responseData.data[0].id] = reward
+            util.updateEnv("REWARD_ID", `'${JSON.stringify(_reward_id)}'`)
+    }
+}
+
+async function completeReward(broadcaster_id, reward_id, redemption_id){
+    const accessToken = process.env.TWITCH_OAUTH_TOKEN;
+    var data = {
+        "status": "FULFILLED"
+    }
+    const response = await fetch(`https://api.twitch.tv/helix/channel_points/custom_rewards/redemptions?broadcaster_id=${broadcaster_id}&reward_id=${reward_id}&id=${redemption_id}`, {
+        method: 'PATCH',
+        headers:{
+            Authorization: `Bearer ${accessToken}`,
+            'Client-Id': process.env.TWITCH_CLIENT_ID,
+            'Content-Type':'application/json'
+        },
+        body: JSON.stringify(data)
+    })
+    const responseData = await response.json();
+    console.log(responseData)
+}
+
 async function fetchSubscriberList(broadcaster_id){
     const accessToken = process.env.TWITCH_OAUTH_TOKEN;
     const response = await fetch(`https://api.twitch.tv/helix/subscriptions?broadcaster_id=${broadcaster_id}`, {
@@ -320,7 +389,7 @@ async function NotificationMessage(JsonMessage){
             onMessage(event.broadcaster_user_name, event.chatter_user_name, event.message.text, event.badges)
         break;
         case 'channel.channel_points_custom_reward_redemption.add':
-            onChannelPointRedemption(event.broadcaster_user_name, event.chatter_user_name, event.reward, event.user_input)
+            onChannelPointRedemption(event.broadcaster_user_name, event.broadcaster_user_id, event.user_name, event.reward, event.id, event.user_input)
         break;
         case 'channel.subscribe':
             subscribers[event.user_name] = parseInt(String(entry.tier).charAt(0));
@@ -384,15 +453,27 @@ async function onCommand(broadcaster, chatter, command, badges = [], args = null
     }
 }
 
-async function onChannelPointRedemption(broadcaster, chatter, reward, prompt = ""){
+async function onChannelPointRedemption(broadcaster, broadcaster_id, chatter, reward, redemption_id, prompt = ""){
     console.log(reward.title.toLowerCase());
-    switch(reward.title.toLowerCase()){
+    var redemption
+    
+    if(_reward_id.hasOwnProperty(reward.id) && _reward_id[reward.id].type){
+        redemption = _reward_id[reward.id].type.toLowerCase()
+    }else{
+        redemption = reward.title.toLowerCase()
+        console.log(`Unknown Reward ID: ${reward.id}\nRedemption Name: ${redemption}`)
+    }
+
+    switch(redemption.trim()){
         case 'spin':
             spin();
             spin('TestScene', 'Main Scene');
             break;
         case 'tts':
-            util.tts(`${chatter} said ${prompt}`);
+            //Redeem TTS
+            util.tts(`${chatter} said ${prompt}`)
+            console.log(reward)
+            completeReward(broadcaster_id, reward.id, redemption_id)
             break;
         
     }
@@ -422,7 +503,15 @@ async function TwitchIntegrations(broadcaster, chatter, message, badges = []){
     }
 }
 
+function toggleAllChannelpoints(state){
+    for(var reward in _reward_id){
+        toggleReward(broadcasterID.trumpet, reward, state)
+    }
+}
+
 export function Quit(){
+    //Disable all channelpoints
+    toggleAllChannelpoints(false)
     //Exit Functionality here
     twitch.close(1000);
 }

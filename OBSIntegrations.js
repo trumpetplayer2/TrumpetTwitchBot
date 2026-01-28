@@ -2,24 +2,43 @@ import OBSWebSocket from "obs-websocket-js";
 import * as util from './util.js';
 import { randomInt } from "node:crypto";
 import { subscribers } from "./TwitchIntegrations.js";
+import { EventHandler } from './index.js';
 
 export var obsConnected = false;
 export var subscriberItems = {};
 
 var broadcasterIcon = false;
+var currentScene = "";
+const swapScenes = JSON.parse(process.env.SCENE_SWAP)
 
 var obs = new OBSWebSocket();
 obs.on('Identified', function hello() {
     obsConnected = true;
     console.log('OBS Connected');
-    clearSubItems();
+    initialize();
 });
 obs.on('ExitStarted', function exit() {
     obsConnected = false;
     console.log('OBS Disconnected');
     subscriberItems = {};
+    reconnect();
 });
 
+async function reconnect(){
+    await util.waitSeconds(5)
+    autoconnect();
+}
+
+obs.on('CurrentProgramSceneChanged', function _(scene){
+    currentScene = scene.sceneName
+    updateCurrentScene();
+})
+async function initialize(){
+    clearSubItems();
+    var scene = await obs.call('GetCurrentProgramScene');
+    currentScene = scene.sceneName;
+    updateCurrentScene();
+}
 export async function clearSubItems() {
     const SubItems = await obs.call('GetSceneItemList', { sceneName: 'SubscriberItems' });
     SubItems.sceneItems.forEach(function (value, index, _) {
@@ -27,6 +46,16 @@ export async function clearSubItems() {
     });
     subscriberItems = {};
 }
+
+async function updateCurrentScene(){
+    if(swapScenes.hasOwnProperty(currentScene)){
+        //Update Scene
+        obs.call('SetCurrentProgramScene', {sceneName: swapScenes[currentScene]});
+        currentScene = swapScenes[currentScene];
+        return;
+    }
+}
+
 //Checks if OBS is connected, if not, attempt to connect
 async function attemptConnectOBS() {
     if (obsConnected)
@@ -36,6 +65,8 @@ async function attemptConnectOBS() {
             rpcVersion: 1
         });
         //console.log(`Connected to OBS Websocket server ${obsWebSocketVersion} (using RPC ${negotiatedRpcVersion})`);
+        await util.waitSeconds(.5);
+        EventHandler.emit("obsconnect")
         return true;
     }
     catch (err) {
@@ -253,6 +284,7 @@ export function register(EventHandler){
     EventHandler.on('message', ObsIntegrations);
     EventHandler.on('command', onCommand)
     EventHandler.on('quit', Quit);
+    autoconnect()
 }
 
 export async function SwitchTheme(theme = 'Normal', sceneName = 'BackgroundElements', directory = process.env.THEME_DIRECTORY){
@@ -272,6 +304,14 @@ export async function SwitchTheme(theme = 'Normal', sceneName = 'BackgroundEleme
         if(!JsonObject.inputKind.toLowerCase().includes('image')) return;
         updateIcon(JsonObject.sourceUuid, `${directory}/${theme}/${JsonObject.sourceName}`);
     })
+}
+
+async function autoconnect(){
+    var attempting = true
+    while(attempting){
+        attempting = !attemptConnectOBS();
+        await util.waitSeconds(5);
+    }
 }
 
 export function Quit(){

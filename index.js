@@ -23,6 +23,37 @@ RegisterList.forEach(func => func(EventHandler))
 process.title = "TwitchBot";
 
 rl.on('line', (input) => {command(input)})
+//Speech 2 Text
+
+S2T = spawn('powershell', //Powershell Command for Speech Recognition
+    [
+        `add-type -assemblyname system.speech;
+        $command = [System.Speech.Recognition.SpeechRecognitionEngine]::new();
+        $commands = [System.Speech.Recognition.Choices]::new("tts", "chat twitch");
+        $commandGrammar = [System.Speech.Recognition.GrammarBuilder]::new($commands);
+        $command.LoadGrammar($commandGrammar);
+        $command.SetInputToDefaultAudioDevice();
+        
+        $sp = [System.Speech.Recognition.SpeechRecognitionEngine]::new();
+        $sp.LoadGrammar([System.Speech.Recognition.DictationGrammar]::new());
+        $sp.SetInputToDefaultAudioDevice();
+        do
+        {
+            $cmd = $command.Recognize();
+            if(-not [System.String]::IsNullOrEmpty($cmd.Text)){
+                [console]::beep(3000, 100)
+                sleep(0.05)
+                [console]::beep(3000, 100)
+                $result = $sp.Recognize();
+                Write-Host "$($cmd.Text) $($result.Text)" -NoNewline
+                [console]::beep(1000, 100)
+            }
+        } while(1)`
+    ],{
+        cwd: process.cwd(),
+        stdio: "pipe"
+    })
+    S2T.stdout.on("data", (data) => s2tMessage(data))
 
 export function command(input){
     var args = input.split(' ');
@@ -48,7 +79,7 @@ export function command(input){
             }
             return;
         case 'output':
-            util.writeFile();
+            util.writeFile(args.join(' '));
             return;
         case 'reauth':
             twitch.generateOAuth();
@@ -72,12 +103,12 @@ export function command(input){
                 return;
             }
             return;
-        case 's2t':
+        /*case 's2t':
             if(S2T != null){
                 console.log("Process already exists")
             }else{
                 console.log('Starting SpeechToText')
-                S2T = spawn('python3', ['SpeechToText.py'], {
+                S2T = spawn('python3', ['python/SpeechToText.py'], {
                     cwd: process.cwd(),
                     stdio: "pipe"
                 })
@@ -87,20 +118,27 @@ export function command(input){
                     S2T = null
                 })
             }
+            return;*/
+        case 'tts':
+            if(args.length > 0){
+                util.tts(args.join(' '), undefined, undefined, false)
+            }
+            return
         default:
-            //console.log(`Unknown Command: \"${command}\"`)
+            console.log(`Unknown Command: \"${command}\"`)
         }
 }
 
 function s2tMessage(data){
     if(data == null) return;
     let text = data.toString()
-    if(text.length > 6){
-        if(text.substring(0,6) == "[data]"){
-            let message = text.substring(6)
-            //HERE WE GO, THE DATA WITH NO STRINGS ATTATCHED SCREW PYTHON
-            return
-        }
-    }
+    text = text.trim();
+    command(text)
     console.log(`[Speech To Text]: ${data}`)
 }
+
+process.on("SIGINT", async () => {
+  EventHandler.emit('quit');
+  await util.waitSeconds(1);
+  process.exit(0);
+});

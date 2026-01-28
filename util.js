@@ -3,7 +3,6 @@ import os from 'node:os';
 import say from 'say';
 
 const voices = await getVoices();
-const defaultVoice = voices[5];
 const defaultPitch = 1;
 
 export async function writeFile(lines = [''], file = 'Output.txt'){
@@ -160,6 +159,12 @@ export function getVoices() {
     })
 }
 
-export function tts(text, voice = defaultVoice, pitch = defaultPitch){
-    say.speak(text, voice, pitch)
+export function tts(text, voice = 2, pitch = defaultPitch, log = true){
+    say.speak(text, voices[voice], pitch, (err) =>{
+        if(err){
+            console.log(err)
+            return
+        }
+        if(log) console.log(`[tts]: ${text}`)
+    })
 }
