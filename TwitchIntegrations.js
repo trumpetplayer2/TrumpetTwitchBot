@@ -472,7 +472,6 @@ async function onChannelPointRedemption(broadcaster, broadcaster_id, chatter, re
         case 'tts':
             //Redeem TTS
             util.tts(`${chatter} said ${prompt}`)
-            console.log(reward)
             completeReward(broadcaster_id, reward.id, redemption_id)
             break;
         
